@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "remove" ] || [ "$1" = "upgrade" ]; then
+    if [ -n "${SUDO_UID:-}" ] && command -v sudo >/dev/null 2>&1; then
+        sudo -u "#$SUDO_UID" systemctl --user stop etakit-kilit.service >/dev/null 2>&1 || true
+    fi
+fi
+
+exit 0

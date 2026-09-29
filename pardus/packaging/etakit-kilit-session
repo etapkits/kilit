@@ -1,0 +1,135 @@
+#!/bin/sh
+# LightDM oturum kancası. Giriş ekranında kilit çalışmaz.
+# Çıkışta kapanır. Girişte çalışan kilit yoksa yenisi başlar.
+mode=$(basename "$0")
+
+is_greeter_user() {
+    case "$1" in
+        lightdm|gdm|gdm3|debian-gdm|sddm|lxdm|root|"") return 0 ;;
+    esac
+    return 1
+}
+
+lock_running() {
+    uid=$1
+    for pid_dir in /proc/[0-9]*; do
+        owner=$(stat -c %u "$pid_dir" 2>/dev/null || true)
+        [ "$owner" = "$uid" ] || continue
+        cmd=$(tr '\0' ' ' < "$pid_dir/cmdline" 2>/dev/null || true)
+        case "$cmd" in
+            /usr/bin/etakit-kilit*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+stop_user() {
+    user=$1
+    uid=$(id -u "$user" 2>/dev/null || true)
+    [ -n "$uid" ] || return 0
+    runtime="/run/user/$uid"
+    if [ -S "$runtime/bus" ]; then
+        runuser -u "$user" -- env \
+            XDG_RUNTIME_DIR="$runtime" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
+            systemctl --user stop etakit-kilit.service >/dev/null 2>&1 || true
+        runuser -u "$user" -- env \
+            XDG_RUNTIME_DIR="$runtime" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
+            systemctl --user unset-environment DISPLAY XAUTHORITY >/dev/null 2>&1 || true
+    fi
+    pkill -u "$uid" -f /usr/bin/etakit-kilit >/dev/null 2>&1 || true
+    pkill -u "$uid" -f /usr/libexec/etakit-kilit-start >/dev/null 2>&1 || true
+}
+
+has_user_session() {
+    uid=$1
+    sessions=$(mktemp)
+    loginctl list-sessions --no-legend >"$sessions" 2>/dev/null || true
+    found=0
+    while read -r sid suid _; do
+        [ "$suid" = "$uid" ] || continue
+        class=$(loginctl show-session "$sid" -p Class 2>/dev/null | sed -n 's/^Class=//p' || true)
+        if [ "$class" = "user" ]; then
+            found=1
+            break
+        fi
+    done <"$sessions"
+    rm -f "$sessions"
+    [ "$found" = 1 ]
+}
+
+start_user() {
+    user=$1
+    uid=$(id -u "$user" 2>/dev/null || echo 0)
+    [ "$uid" -ge 1000 ] || return 0
+    is_greeter_user "$user" && return 0
+    if lock_running "$uid"; then
+        return 0
+    fi
+    runtime="/run/user/$uid"
+    display=${DISPLAY:-}
+    xauth=${XAUTHORITY:-}
+    if [ -S "$runtime/bus" ]; then
+        runuser -u "$user" -- env \
+            XDG_RUNTIME_DIR="$runtime" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
+            DISPLAY="$display" \
+            XAUTHORITY="$xauth" \
+            systemctl --user import-environment DISPLAY XAUTHORITY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS \
+            >/dev/null 2>&1 || true
+        if runuser -u "$user" -- env \
+            XDG_RUNTIME_DIR="$runtime" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
+            systemctl --user start etakit-kilit.service >/dev/null 2>&1
+        then
+            return 0
+        fi
+    fi
+    if lock_running "$uid"; then
+        return 0
+    fi
+    setsid runuser -u "$user" -- env \
+        XDG_RUNTIME_DIR="$runtime" \
+        DISPLAY="$display" \
+        XAUTHORITY="$xauth" \
+        XDG_SESSION_CLASS=user \
+        GDK_BACKEND=x11 \
+        PYTHONUNBUFFERED=1 \
+        /usr/bin/etakit-kilit >/dev/null 2>&1 </dev/null &
+}
+
+case "$mode" in
+    etakit-kilit-session-cleanup)
+        user=${USER:-}
+        is_greeter_user "$user" && exit 0
+        stop_user "$user"
+        ;;
+    etakit-kilit-session-greeter)
+        for pid_dir in /proc/[0-9]*; do
+            cmd=$(tr '\0' ' ' < "$pid_dir/cmdline" 2>/dev/null || true)
+            case "$cmd" in
+                /usr/bin/etakit-kilit*) ;;
+                *) continue ;;
+            esac
+            owner=$(stat -c %u "$pid_dir" 2>/dev/null || true)
+            [ -n "$owner" ] || continue
+            if has_user_session "$owner"; then
+                continue
+            fi
+            name=$(ps -o user= -p "${pid_dir#/proc/}" 2>/dev/null | tr -d ' ' || true)
+            [ -n "$name" ] || continue
+            stop_user "$name"
+        done
+        for greeter in lightdm gdm gdm3 debian-gdm sddm lxdm; do
+            if id "$greeter" >/dev/null 2>&1; then
+                stop_user "$greeter"
+            fi
+        done
+        ;;
+    etakit-kilit-session-setup)
+        start_user "${USER:-}"
+        ;;
+esac
+
+exit 0

@@ -1,0 +1,41 @@
+#!/bin/sh
+# Oturum açılınca kullanıcı servisini başlatır. Servis düşünce yeniden açar.
+# Giriş ekranındaki kullanıcı listesinde çalışmaz.
+case "${XDG_SESSION_CLASS:-}" in
+    greeter) exit 0 ;;
+esac
+case "$(id -un 2>/dev/null || true)" in
+    lightdm|gdm|gdm3|debian-gdm|sddm|lxdm) exit 0 ;;
+esac
+if [ "${XDG_SESSION_CLASS:-}" != "user" ] && [ "$(id -u 2>/dev/null || echo 0)" -lt 1000 ]; then
+    exit 0
+fi
+
+export PYTHONUNBUFFERED=1
+export GDK_BACKEND=x11
+
+uid=$(id -u 2>/dev/null || echo 0)
+for pid_dir in /proc/[0-9]*; do
+    owner=$(stat -c %u "$pid_dir" 2>/dev/null || true)
+    [ "$owner" = "$uid" ] || continue
+    cmd=$(tr '\0' ' ' < "$pid_dir/cmdline" 2>/dev/null || true)
+    case "$cmd" in
+        /usr/bin/etakit-kilit*) exit 0 ;;
+    esac
+done
+
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl --user import-environment DISPLAY XAUTHORITY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY all_proxy ALL_PROXY >/dev/null 2>&1 || true
+    if systemctl --user start etakit-kilit.service >/dev/null 2>&1; then
+        exit 0
+    fi
+fi
+
+while true; do
+    /usr/bin/etakit-kilit
+    status=$?
+    if [ "$status" -eq 0 ]; then
+        exit 0
+    fi
+    sleep 1
+done

@@ -1,0 +1,8 @@
+#!/usr/bin/python3
+import sys
+
+sys.path.insert(0, "/usr/lib/etakit-kilit")
+
+from etakit_kilit.app import main
+
+raise SystemExit(main())

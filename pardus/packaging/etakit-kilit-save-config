@@ -1,0 +1,134 @@
+#!/usr/bin/python3
+"""Kök olarak /etc/etakit/kilit.conf yazar. Kurulum bitene kadar."""
+
+import os
+import sys
+import tempfile
+
+sys.path.insert(0, "/usr/lib/etakit-kilit")
+
+from etakit_kilit.config import SYSTEM_CONFIG, ConfigError, install_config_text
+
+
+def _write_board_name(source: str) -> int:
+    source = os.path.realpath(source)
+    temp_root = os.path.realpath(tempfile.gettempdir())
+    if not source.startswith(temp_root + os.sep) or not os.path.isfile(source):
+        print("geçersiz kaynak", file=sys.stderr)
+        return 1
+    try:
+        with open(source, encoding="utf-8") as handle:
+            name = " ".join(handle.read().split())
+        if name == "":
+            print("Tahta adı boş olamaz.", file=sys.stderr)
+            return 1
+        from etakit_kilit.config import Config
+
+        current = Config.load(SYSTEM_CONFIG, required=False)
+        current.board_name = name
+        install_config_text(current.render(), SYSTEM_CONFIG)
+    except ConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    finally:
+        try:
+            os.unlink(source)
+        except OSError:
+            pass
+    return 0
+
+
+def _write_connection(source: str) -> int:
+    source = os.path.realpath(source)
+    temp_root = os.path.realpath(tempfile.gettempdir())
+    if not source.startswith(temp_root + os.sep) or not os.path.isfile(source):
+        print("geçersiz kaynak", file=sys.stderr)
+        return 1
+    try:
+        values = {}
+        with open(source, encoding="utf-8") as handle:
+            for line in handle:
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                values[key.strip()] = value.strip()
+        tls = values.get("tls_verify", "yes").lower() in {"1", "yes", "true", "evet", "on"}
+        from etakit_kilit.config import update_connection
+
+        update_connection(SYSTEM_CONFIG, values.get("server_url", ""), values.get("enrollment_key", ""), tls)
+    except ConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    finally:
+        try:
+            os.unlink(source)
+        except OSError:
+            pass
+    return 0
+
+
+def _replace_config(source: str) -> int:
+    source = os.path.realpath(source)
+    temp_root = os.path.realpath(tempfile.gettempdir())
+    if not source.startswith(temp_root + os.sep) or not os.path.isfile(source):
+        print("geçersiz kaynak", file=sys.stderr)
+        return 1
+    try:
+        with open(source, encoding="utf-8") as handle:
+            text = handle.read()
+        install_config_text(text, SYSTEM_CONFIG, only_if_unconfigured=False)
+    except ConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    finally:
+        try:
+            os.unlink(source)
+        except OSError:
+            pass
+    return 0
+
+
+def main() -> int:
+    if len(sys.argv) == 3 and sys.argv[1] == "--board-name":
+        return _write_board_name(sys.argv[2])
+    if len(sys.argv) == 3 and sys.argv[1] == "--connection":
+        return _write_connection(sys.argv[2])
+    if len(sys.argv) == 3 and sys.argv[1] == "--replace":
+        return _replace_config(sys.argv[2])
+    if len(sys.argv) != 2:
+        print("kaynak dosya gerekli", file=sys.stderr)
+        return 1
+    source = os.path.realpath(sys.argv[1])
+    temp_root = os.path.realpath(tempfile.gettempdir())
+    if not source.startswith(temp_root + os.sep) or not os.path.isfile(source):
+        print("geçersiz kaynak", file=sys.stderr)
+        return 1
+    try:
+        with open(source, encoding="utf-8") as handle:
+            text = handle.read()
+        install_config_text(text, SYSTEM_CONFIG, only_if_unconfigured=True)
+    except ConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    finally:
+        try:
+            os.unlink(source)
+        except OSError:
+            pass
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

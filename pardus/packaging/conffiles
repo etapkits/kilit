@@ -1,0 +1,3 @@
+/etc/etakit/kilit.conf
+/etc/X11/xorg.conf.d/50-etakit-kilit.conf
+/etc/polkit-1/rules.d/49-etakit-poweroff.rules

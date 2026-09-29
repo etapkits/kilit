@@ -1,0 +1,3 @@
+#!/bin/sh
+# Etakit panelinden gelen "Kapat" komutu için. Yalnızca tahtayı kapatır; argüman almaz.
+exec /bin/systemctl poweroff --ignore-inhibitors

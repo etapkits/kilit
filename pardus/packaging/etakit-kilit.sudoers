@@ -1,0 +1,2 @@
+# Etakit kilidi panelden gelen kapatma komutunu parola sormadan uygular.
+ALL ALL=(root) NOPASSWD: /usr/libexec/etakit-kilit-poweroff ""

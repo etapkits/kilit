@@ -1,0 +1,14 @@
+Package: etakit-kilit
+Version: 1.4.24
+Section: education
+Priority: optional
+Architecture: all
+Maintainer: Etakit <etakit@localhost>
+Depends: python3 (>= 3.9), python3-gi, gir1.2-gtk-3.0, python3-cairo, python3-qrcode, libxss1, polkitd | policykit-1, sudo
+Description: ETAP etkileşimli tahta kilidi
+ Pardus ETAP oturumunda kullanıcı girdikten sonra masaüstünü kilitler.
+ Çıkışta ve kullanıcı seçim ekranında kilit çalışmaz.
+ Uygulama menüsünde Etakit Kilit Ayarları vardır.
+ Sunucu adresi kaydedilmeden kilit açılmaz; ayar penceresi normal penceredir.
+ Açma yalnızca sitede okutulan karekodla olur.
+ Tahta sunucuya kendisi bağlanır; tahtaya dışarıdan kapı açılmaz.

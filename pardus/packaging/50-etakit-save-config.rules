@@ -1,0 +1,5 @@
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.etakit.kilit.save-config" && subject.local) {
+        return polkit.Result.YES;
+    }
+});

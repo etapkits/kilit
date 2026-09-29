@@ -1,0 +1,113 @@
+#!/bin/sh
+set -e
+
+install -d -m 0755 /etc/etakit
+install -d -m 0755 /etc/X11/xorg.conf.d
+install -d -m 0755 /etc/polkit-1/rules.d
+
+sudoers=/etc/sudoers.d/etakit-kilit
+if [ -f "$sudoers" ]; then
+    chown root:root "$sudoers"
+    chmod 0440 "$sudoers"
+    if command -v visudo >/dev/null 2>&1 && ! visudo -cf "$sudoers" >/dev/null 2>&1; then
+        echo "etakit-kilit: $sudoers geçersiz, kaldırıldı" >&2
+        rm -f "$sudoers"
+    fi
+fi
+
+state=/var/lib/etakit
+install -d -m 0777 "$state"
+chmod 0777 "$state"
+chmod a+rX "$state"
+if [ -n "$(ls -A "$state" 2>/dev/null)" ]; then
+    chmod 0666 "$state"/* 2>/dev/null || true
+fi
+
+for greeter in lightdm gdm gdm3 debian-gdm sddm lxdm; do
+    pkill -u "$greeter" -f /usr/bin/etakit-kilit >/dev/null 2>&1 || true
+done
+
+open_settings_now() {
+    command -v loginctl >/dev/null 2>&1 || return 0
+    command -v runuser >/dev/null 2>&1 || return 0
+    sessions=$(mktemp)
+    loginctl list-sessions --no-legend >"$sessions" 2>/dev/null || true
+    while read -r sid uid user _; do
+        [ -n "$uid" ] && [ -n "$user" ] || continue
+        [ "$uid" -ge 1000 ] 2>/dev/null || continue
+        case "$user" in
+            lightdm|gdm|gdm3|debian-gdm|sddm|lxdm) continue ;;
+        esac
+        class=$(loginctl show-session "$sid" -p Class 2>/dev/null | sed -n 's/^Class=//p' || true)
+        case "$class" in
+            greeter|lock-screen) continue ;;
+        esac
+        runtime="/run/user/$uid"
+        [ -d "$runtime" ] || continue
+        display=""
+        xauth=""
+        for pid_dir in /proc/[0-9]*; do
+            [ -r "$pid_dir/environ" ] || continue
+            owner=$(stat -c %u "$pid_dir" 2>/dev/null || true)
+            [ "$owner" = "$uid" ] || continue
+            display=$(tr '\0' '\n' < "$pid_dir/environ" 2>/dev/null | sed -n 's/^DISPLAY=//p' | head -n 1)
+            [ -n "$display" ] || continue
+            xauth=$(tr '\0' '\n' < "$pid_dir/environ" 2>/dev/null | sed -n 's/^XAUTHORITY=//p' | head -n 1)
+            break
+        done
+        [ -n "$display" ] || continue
+        runuser -u "$user" -- env \
+            XDG_RUNTIME_DIR="$runtime" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
+            DISPLAY="$display" \
+            XAUTHORITY="$xauth" \
+            systemctl --user stop etakit-kilit.service >/dev/null 2>&1 || true
+        pkill -u "$uid" -f /usr/bin/etakit-kilit >/dev/null 2>&1 || true
+        runuser -u "$user" -- env \
+            XDG_RUNTIME_DIR="$runtime" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
+            DISPLAY="$display" \
+            XAUTHORITY="$xauth" \
+            systemctl --user set-environment \
+            DISPLAY="$display" XAUTHORITY="$xauth" \
+            XDG_RUNTIME_DIR="$runtime" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
+            >/dev/null 2>&1 || true
+        if ! runuser -u "$user" -- env \
+            XDG_RUNTIME_DIR="$runtime" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
+            DISPLAY="$display" \
+            XAUTHORITY="$xauth" \
+            systemctl --user restart etakit-kilit.service >/dev/null 2>&1
+        then
+            setsid runuser -u "$user" -- env \
+                XDG_RUNTIME_DIR="$runtime" \
+                DISPLAY="$display" \
+                XAUTHORITY="$xauth" \
+                /usr/bin/etakit-kilit >/dev/null 2>&1 </dev/null &
+        fi
+    done <"$sessions"
+    rm -f "$sessions"
+}
+
+conf=/etc/etakit/kilit.conf
+if [ -f "$conf" ]; then
+    sed -i -E 's|^server_url=https?://etakit\.okul\.local/?$|server_url=|' "$conf"
+    chmod 0666 "$conf" || true
+fi
+
+server=""
+if [ -f "$conf" ]; then
+    server=$(sed -n 's/^server_url=//p' "$conf" 2>/dev/null | head -n 1 | tr -d ' \r' || true)
+fi
+case "$server" in
+    ""|http://etakit.okul.local|https://etakit.okul.local|http://etakit.okul.local/|https://etakit.okul.local/)
+        open_settings_now || true
+        ;;
+esac
+
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+fi
+
+exit 0
